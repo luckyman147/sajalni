@@ -1,8 +1,16 @@
 {
   "name": "sajalni",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Automated demo recorder for AI agents — generate Playwright scripts that walk through any web project and export as video",
-  "keywords": ["demo", "recording", "playwright", "video", "walkthrough", "webm", "screencast"],
+  "keywords": [
+    "demo",
+    "recording",
+    "playwright",
+    "video",
+    "walkthrough",
+    "webm",
+    "screencast"
+  ],
   "homepage": "https://github.com/anomalyco/sajalni",
   "bugs": "https://github.com/anomalyco/sajalni/issues",
   "license": "MIT",
