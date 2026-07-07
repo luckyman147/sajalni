@@ -1,0 +1,8 @@
+{
+  "name": "sajalni",
+  "version": "1.0.0",
+  "description": "Automated demo recorder for AI agents — generates Playwright scripts, walks through any web project, and exports as WebM video. Works with any framework.",
+  "author": "luckyman147",
+  "skills": ["SKILL.md"],
+  "homepage": "https://github.com/luckyman147/sajalni"
+}

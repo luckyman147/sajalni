@@ -2,27 +2,24 @@
  * Generates a Playwright demo script from user-provided flow description.
  */
 
-export function generateScript({ url, flow, outputDir, supabaseUrl, supabaseKey, email, password }) {
-  const hasAuth = !!(supabaseUrl && supabaseKey && email && password);
+export function generateScript({ url, flow, outputDir, email, password }) {
+  const hasAuth = !!(email && password);
 
-  const authSection = hasAuth ? `
-  // Auth via Supabase REST API
-  await soft(page, () => page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 20000 }));
-  const authResult = await page.evaluate(async ({ url, key, email, password }) => {
-    const res = await fetch(url + '/auth/v1/token?grant_type=password', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', apikey: key },
-      body: JSON.stringify({ email, password }),
-    });
-    const d = await res.json();
-    return { ok: res.ok, token: d.access_token, refresh: d.refresh_token };
-  }, { url: '${supabaseUrl}', key: '${supabaseKey}', email: '${email}', password: '${password}' });
-  if (authResult.ok) {
-    await page.evaluate(({ t, r }) => {
-      document.cookie = 'sb-access-token=' + t + '; path=/; max-age=36000';
-      document.cookie = 'sb-refresh-token=' + r + '; path=/; max-age=36000';
-    }, { t: authResult.token, r: authResult.refresh });
-  }
+  const authComment = hasAuth ? `
+  // Auth credentials provided: ${email}
+  // The agent picks the right strategy for the project:
+  //
+  //   Form login:
+  //     await page.fill('input[name="email"]', '${email}');
+  //     await page.fill('input[name="password"]', '${password}');
+  //     await page.click('button[type="submit"]');
+  //     await page.waitForURL('**/dashboard', { timeout: 15000 }).catch(() => {});
+  //
+  //   Cookie injection (navigate to origin first):
+  //     await page.evaluate(() => { document.cookie = 'token=...; path=/; max-age=36000'; });
+  //
+  //   localStorage / JWT:
+  //     await page.evaluate(() => { localStorage.setItem('access_token', '...'); });
 ` : '';
 
   return `
@@ -74,13 +71,12 @@ async function main() {
   const page = await ctx.newPage();
   try {
     await page.evaluate(() => document.fonts.ready);
-${authSection}
+${authComment}
     // ── Walkthrough: ${flow} ──
     await page.goto(baseUrl, { waitUntil: 'networkidle' });
     await sleep(2000);
 
     // TODO: add your steps using soft() and findClick()
-    // await soft(page, () => findClick(page, 'a[href="/login"]', 'button:has-text("Sign In")'));
 
   } finally {
     await ctx.close(); await browser.close(); server.kill();

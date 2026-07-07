@@ -6,31 +6,24 @@ description: Record WebM demo videos of any web project by generating and runnin
 # Sajalni — Automated Demo Recorder
 
 ## Overview
-Generates a Playwright script that walks through a project's UI and captures the browser session as WebM. Works with any framework: Vite, Next.js, React, Vue, Angular, Svelte, static HTML, etc.
+Generates a Playwright script that walks through any web project's UI and captures the browser session as WebM. Framework-agnostic: Vite, Next.js, React, Vue, Angular, Svelte, static HTML, or anything that runs a dev server.
 
 ## Hard Rule — Error Resilience
-Every step must be wrapped in try/catch. A missing button, slow load, or timeout must NEVER crash the script. Use `soft()` helper, `.or()` selectors, and `catch(() => {})` everywhere.
-
-## Hard Rule — Supabase + Next.js Auth
-Next.js server actions for auth often silently fail. Use REST API bypass:
-1. Navigate to origin first (so `document.cookie` is writable)
-2. POST to `{SUPABASE_URL}/auth/v1/token?grant_type=password`
-3. Set `sb-access-token` + `sb-refresh-token` cookies via `document.cookie`
-4. Navigate to protected page
+Every step must be wrapped in try/catch. A missing button, slow load, or timeout must NEVER crash the script. Use the `soft()` helper, `.or()` selectors, and `catch(() => {})` everywhere.
 
 ## Workflow
 
 ### Step 1: Understand the Project
 1. Read `package.json` / `README` / source files to determine:
-   - Framework and dev server command
-   - Port number (default 3000 or 5173)
+   - Framework and dev server command (`npm run dev`, `pnpm dev`, etc.)
+   - Default port (3000, 5173, 8080, etc.)
    - Routes and UI structure
-   - If Supabase: extract project URL and anon key from source
-2. Ask the user to describe the exact flow (pages, actions, pauses).
+   - Auth mechanism (cookies, localStorage, token headers, form-based)
+2. Ask the user to describe the exact flow (pages, actions, pauses, credentials).
 
 ### Step 2: Generate the Playwright Script
 1. Create `sajalni-demo.js` (ESM) in the project root.
-2. Use the template below — includes resilient helpers and Supabase auth.
+2. Use the template below — adapt auth strategy to the project's framework.
 
 ```js
 import { chromium } from 'playwright';
@@ -59,8 +52,9 @@ async function findClick(page, ...selectors) {
 
 function startDevServer() {
   return new Promise((resolve, reject) => {
-    const cmd = getDevCommand();
-    const server = spawn('npx', cmd.split(' ').slice(1), { stdio: 'pipe', shell: true });
+    const pkg = JSON.parse(fs.readFileSync('./package.json', 'utf-8'));
+    const devCmd = pkg.scripts?.dev || 'next dev --port 3000';
+    const server = spawn('npx', devCmd.split(' '), { stdio: 'pipe', shell: true });
     let resolved = false;
     const onData = (d) => {
       const t = d.toString().replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '');
@@ -72,32 +66,6 @@ function startDevServer() {
   });
 }
 
-function getDevCommand() {
-  const pkg = JSON.parse(fs.readFileSync('./package.json', 'utf-8'));
-  if (pkg.scripts?.dev) return `npx ${pkg.scripts.dev}`;
-  return 'npx next dev --port 3000';
-}
-
-async function supabaseAuth(page, baseUrl, supabaseUrl, supabaseKey, email, password) {
-  await soft(page, () => page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 20000 }));
-  const result = await page.evaluate(async ({ url, key, email, password }) => {
-    const res = await fetch(`${url}/auth/v1/token?grant_type=password`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', apikey: key },
-      body: JSON.stringify({ email, password }),
-    });
-    const d = await res.json();
-    return { ok: res.ok, token: d.access_token, refresh: d.refresh_token };
-  }, { url: supabaseUrl, key: supabaseKey, email, password });
-  if (!result.ok) throw new Error('Supabase auth failed');
-  await page.evaluate(({ t, r }) => {
-    document.cookie = `sb-access-token=${t}; path=/; max-age=36000`;
-    document.cookie = `sb-refresh-token=${r}; path=/; max-age=36000`;
-  }, { t: result.token, r: result.refresh });
-  await page.goto(`${baseUrl}/dashboard`, { waitUntil: 'networkidle', timeout: 30000 });
-  await sleep(2000);
-}
-
 async function main() {
   const { server, baseUrl } = await startDevServer();
   const browser = await chromium.launch({ headless: false });
@@ -107,8 +75,23 @@ async function main() {
     await page.evaluate(() => document.fonts.ready);
 
     // ── walkthrough steps (wrap each in soft) ──
-    // await soft(page, () => page.goto(...));
-    // await soft(page, () => findClick(page, 'button', 'a.btn'));
+    // Pick auth strategy based on project:
+    //
+    //   Form login:
+    //     await page.fill('input[name="email"]', 'user@example.com');
+    //     await page.fill('input[name="password"]', 'pass');
+    //     await page.click('button[type="submit"]');
+    //     await page.waitForURL('**/dashboard', { timeout: 15000 }).catch(() => {});
+    //
+    //   Cookie injection:
+    //     await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+    //     await page.evaluate(() => { document.cookie = 'token=...; path=/; max-age=36000'; });
+    //
+    //   localStorage / JWT:
+    //     await page.evaluate(() => { localStorage.setItem('access_token', '...'); });
+    //
+    // await soft(page, () => page.goto(baseUrl, { waitUntil: 'networkidle' }));
+    // await soft(page, () => findClick(page, 'a[href="/login"]', 'button:has-text("Sign In")'));
 
   } finally {
     await ctx.close(); await browser.close(); server.kill();
@@ -120,7 +103,7 @@ async function main() {
 main().catch(() => process.exit(1));
 ```
 
-### Step 3: Install
+### Step 3: Install Dependencies
 ```bash
 npm install playwright
 npx playwright install chromium
@@ -132,13 +115,24 @@ node sajalni-demo.js
 ```
 
 ### Step 5: Deliver
-Report output WebM path(s). Delete `sajalni-demo.js` after use.
+Report the output WebM path(s). Delete `sajalni-demo.js` after use.
+
+## Auth Strategies (pick one per project)
+
+| Strategy | When to use | Code |
+|----------|-------------|------|
+| **Form login** | Standard email/password forms | `page.fill('input[name="email"]', email)` + `page.click('button[type="submit"]')` then `page.waitForURL('**/dashboard')` |
+| **Cookie injection** | Auth token stored in cookies | Navigate to origin first, then `page.evaluate(() => document.cookie = 'token=...')` |
+| **localStorage** | SPA/JWT tokens (React, Vue, Angular) | `page.evaluate(() => localStorage.setItem('token', '...'))` |
+| **API token header** | Projects using `Authorization: Bearer` | Use `page.route()` to inject header or localStorage |
+| **No auth** | Public sites / landing pages | Skip auth entirely |
 
 ## Tips
 - Use `soft()` for every click/fill/navigation — never let a missing element crash.
-- Use `findClick(page, 'btn1', 'btn2', 'btn3')` to try multiple selectors.
-- Navigate to origin BEFORE setting `document.cookie` (avoids "Access is denied").
-- Use `page.waitForURL()` for redirects instead of fixed sleep.
+- Use `findClick(page, 'btn1', 'btn2', 'btn3')` to try multiple selectors for the same action.
+- Always navigate to the origin BEFORE setting `document.cookie` — avoids "Access is denied".
+- Use `page.waitForURL()` for redirects instead of fixed `sleep()` where possible.
+- Pause 1.5-2s between steps for a natural-looking demo.
 - For separate videos per scene, create a NEW browser context per scene.
 - Merge WebM files: `ffmpeg -f concat -safe 0 -i files.txt -c copy merged.webm`.
 
@@ -152,4 +146,5 @@ Report output WebM path(s). Delete `sajalni-demo.js` after use.
 | Angular | `npx ng serve --port 3000` | 4200 |
 | Vue CLI | `npx vue-cli-service serve --port 3000` | 8080 |
 | Nuxt | `npx nuxt dev --port 3000` | 3000 |
+| SvelteKit | `npx vite dev --port 3000` | 5173 |
 | Static HTML | `npx serve . -p 3000` | 3000 |

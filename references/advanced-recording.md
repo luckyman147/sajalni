@@ -32,12 +32,28 @@ echo "file 'scene2.webm'" >> files.txt
 ffmpeg -f concat -safe 0 -i files.txt -c copy merged.webm
 ```
 
-## Supabase Auth (Cookie Injection)
+## Auth — Cookie Injection
+```js
+// Must navigate to origin FIRST to allow document.cookie
+await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+await page.evaluate(({ token }) => {
+  document.cookie = `token=${token}; path=/; max-age=36000`;
+}, { token: accessToken });
+```
+
+## Auth — localStorage / JWT
 ```js
 await page.evaluate(({ token }) => {
-  document.cookie = `sb-access-token=${token}; path=/; max-age=36000`;
-  document.cookie = `sb-refresh-token=${token}; path=/; max-age=36000`;
+  localStorage.setItem('access_token', token);
 }, { token: accessToken });
+```
+
+## Auth — Form Login
+```js
+await page.fill('input[name="email"]', email);
+await page.fill('input[name="password"]', password);
+await page.click('button[type="submit"]');
+await page.waitForURL('**/dashboard', { timeout: 15000 }).catch(() => {});
 ```
 
 ## FFmpeg Advanced Conversion
@@ -56,7 +72,6 @@ ffmpeg -i input.webm -vf "fps=10,scale=640:-1:flags=lanczos" -c:v gif preview.gi
 
 ## Resilient Selectors (findClick)
 ```js
-// Tries multiple selectors, returns true on first success
 async function findClick(page, ...selectors) {
   for (const sel of selectors) {
     const el = page.locator(sel).first();
@@ -67,7 +82,7 @@ async function findClick(page, ...selectors) {
   return false;
 }
 
-// Usage
+// Usage — tries each selector until one works
 await findClick(page, 'button:has-text("Submit")', 'input[type="submit"]', '#submit-btn');
 ```
 
